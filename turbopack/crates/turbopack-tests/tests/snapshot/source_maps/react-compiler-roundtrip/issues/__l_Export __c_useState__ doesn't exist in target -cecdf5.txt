@@ -1,0 +1,24 @@
+error - [bindings] /turbopack/crates/turbopack-tests/tests/snapshot/source_maps/react-compiler-roundtrip/input/Component.jsx:1:0  Export useState doesn't exist in target module
+  
+         + v------------------------------v
+       1 + import { useState } from 'react'
+         + ^------------------------------^
+       2 | 
+       3 | export function Counter({ initialCount }) {
+       4 |   const [count, setCount] = useState(initialCount)
+       5 |   const doubled = count * 2
+  
+  The export useState was not found in module [project]/turbopack/crates/turbopack-tests/tests/snapshot/node_modules/react/index.js [test] (ecmascript).
+  
+  Did you mean to import jsx?
+  
+  All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+  
+  
+  | These are the exports of the module:
+  | jsx
+  | 
+  Import trace:
+    test:
+      ./turbopack/crates/turbopack-tests/tests/snapshot/source_maps/react-compiler-roundtrip/input/Component.jsx
+      ./turbopack/crates/turbopack-tests/tests/snapshot/source_maps/react-compiler-roundtrip/input/index.js

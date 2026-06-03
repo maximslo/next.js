@@ -28,6 +28,7 @@ use turbopack::{
         ModuleRuleEffect, RuleCondition, TypescriptTransformOptions,
     },
 };
+use turbopack_ecmascript::transform::RustReactCompilerCompilationMode;
 use turbopack_browser::BrowserChunkingContext;
 use turbopack_core::{
     asset::Asset,
@@ -102,6 +103,8 @@ struct SnapshotOptions {
     source_map_source_type: SourceMapSourceType,
     #[serde(default = "default_chunk_loading_global")]
     chunk_loading_global: String,
+    #[serde(default)]
+    enable_rust_react_compiler: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -135,6 +138,7 @@ impl Default for SnapshotOptions {
             enable_debug_ids: false,
             source_map_source_type: SourceMapSourceType::default(),
             chunk_loading_global: default_chunk_loading_global(),
+            enable_rust_react_compiler: false,
         }
     }
 }
@@ -402,6 +406,9 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
                 ignore_dynamic_requests: true,
                 infer_module_side_effects: true,
                 enable_exports_info_inlining: true,
+                enable_rust_react_compiler: options.enable_rust_react_compiler.then_some(
+                    RustReactCompilerCompilationMode::Infer,
+                ),
                 ..Default::default()
             },
             environment: Some(env),

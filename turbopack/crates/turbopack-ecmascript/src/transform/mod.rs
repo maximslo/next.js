@@ -82,7 +82,39 @@ pub enum EcmascriptInputTransform {
         emit_decorators_metadata: bool,
         use_define_for_class_fields: bool,
     },
+    /// Experimental: run the Rust port of the React compiler before other transforms.
+    ///
+    /// Uses a text bridge (codegen → react_compiler_swc → re-parse) due to SWC version
+    /// mismatch between turbopack (swc_ecma_ast v23) and react_compiler_swc (v21).
+    /// Source map spans reference the compiled intermediate source, not the original.
+    ReactCompilerRust {
+        compilation_mode: RustReactCompilerCompilationMode,
+    },
 }
+
+/// Compilation mode passed through to `react_compiler_swc`.
+#[turbo_tasks::value(shared)]
+#[derive(Default, Debug, Clone, Copy, Hash)]
+pub enum RustReactCompilerCompilationMode {
+    #[default]
+    Infer,
+    Annotation,
+    All,
+}
+
+impl RustReactCompilerCompilationMode {
+    /// The string form expected by `react_compiler_swc`'s JSON options.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RustReactCompilerCompilationMode::Infer => "infer",
+            RustReactCompilerCompilationMode::Annotation => "annotation",
+            RustReactCompilerCompilationMode::All => "all",
+        }
+    }
+}
+
+#[turbo_tasks::value(transparent)]
+pub struct OptionRustReactCompilerCompilationMode(Option<RustReactCompilerCompilationMode>);
 
 /// The CustomTransformer trait allows you to implement your own custom SWC
 /// transformer to run over all ECMAScript files imported in the graph.
@@ -343,6 +375,9 @@ impl EcmascriptInputTransform {
 
                 apply_transform(program, helpers, decorators(config))
             }
+            EcmascriptInputTransform::ReactCompilerRust { compilation_mode } => {
+                apply_rust_react_compiler(program, ctx, helpers, *compilation_mode).await?
+            }
             EcmascriptInputTransform::Plugin(transform) => {
                 // We cannot pass helpers to plugins, so we return them as is
                 transform.await?.transform(program, ctx).await?;
@@ -350,6 +385,84 @@ impl EcmascriptInputTransform {
             }
         })
     }
+}
+
+async fn apply_rust_react_compiler(
+    program: &mut Program,
+    ctx: &TransformContext<'_>,
+    helpers: HelperData,
+    compilation_mode: RustReactCompilerCompilationMode,
+) -> Result<HelperData> {
+    // Only transform user code — not node_modules or paths outside the project root.
+    if ctx.file_path_str.contains("node_modules") || ctx.file_path_str.starts_with("../") {
+        return Ok(helpers);
+    }
+
+    // Only transform files with React components or hooks. This avoids adding
+    // `useMemoCache` imports to RSC server files and route handlers.
+    if !next_custom_transforms::react_compiler::is_required(program) {
+        return Ok(helpers);
+    }
+
+    let Program::Module(module) = program else {
+        return Ok(helpers);
+    };
+
+    // Emit to text so react_compiler_swc::transform can extract source positions.
+    // No sourcemap capture needed — spans in the output module reference ctx.source_map
+    // positions directly since we now share the same swc_core AST version.
+    let source_text = {
+        use swc_core::ecma::codegen::{Config as CodegenConfig, Emitter, text_writer::JsWriter};
+        let mut buf = Vec::new();
+        let wr = JsWriter::new(ctx.source_map.clone(), "\n", &mut buf, None);
+        let mut emitter = Emitter {
+            cfg: CodegenConfig::default(),
+            cm: ctx.source_map.clone(),
+            comments: Some(ctx.comments as &dyn swc_core::common::comments::Comments),
+            wr,
+        };
+        emitter
+            .emit_module(module)
+            .map_err(|e| anyhow::anyhow!("react compiler: emit failed: {e}"))?;
+        String::from_utf8(buf)
+            .map_err(|e| anyhow::anyhow!("react compiler: non-utf8 output: {e}"))?
+    };
+
+    let options = react_compiler_swc_options(ctx, compilation_mode)?;
+    let result = react_compiler_swc::transform(module, &source_text, options);
+
+    for diag in &result.diagnostics {
+        tracing::warn!(
+            file = ctx.file_path_str,
+            "React Compiler (Rust): {}",
+            diag.message
+        );
+    }
+
+    if let Some(compiled_module) = result.module {
+        *program = Program::Module(compiled_module);
+    }
+
+    Ok(helpers)
+}
+
+fn react_compiler_swc_options(
+    ctx: &TransformContext<'_>,
+    compilation_mode: RustReactCompilerCompilationMode,
+) -> Result<react_compiler::entrypoint::plugin_options::PluginOptions> {
+    serde_json::from_value(serde_json::json!({
+        "shouldCompile": true,
+        "enableReanimated": false,
+        "isDev": ctx.node_env != "production",
+        "compilationMode": compilation_mode.as_str(),
+        "panicThreshold": "none",
+        "flowSuppressions": false,
+        "noEmit": false,
+        "ignoreUseNoForget": false,
+        "filename": ctx.file_name_str,
+        "environment": {}
+    }))
+    .map_err(|e| anyhow::anyhow!("react compiler: invalid options: {e}"))
 }
 
 fn apply_transform(program: &mut Program, helpers: HelperData, op: impl Pass) -> HelperData {

@@ -209,6 +209,10 @@ turbopack-trace-server = { path = "turbopack/crates/turbopack-trace-server" }
 turbopack-trace-utils = { path = "turbopack/crates/turbopack-trace-utils" }
 turbopack-wasm = { path = "turbopack/crates/turbopack-wasm" }
 
+# React compiler Rust port — directly used crates (facebook/react@55d6ff61692a99b47818dcf25e82350d39a26235)
+react_compiler_swc = { git = "https://github.com/facebook/react.git", rev = "55d6ff61692a99b47818dcf25e82350d39a26235", package = "react_compiler_swc" }
+react_compiler = { git = "https://github.com/facebook/react.git", rev = "55d6ff61692a99b47818dcf25e82350d39a26235", package = "react_compiler" }
+
 # SWC crates
 swc_core = { version = "65.0.3", default-features = false, features = [
   "ecma_loader_lru",
@@ -371,3 +375,6 @@ virtue = { git = "https://github.com/bgw/virtue.git", branch = "bgw/fix-generic-
 mdxjs = { git = "https://github.com/vercel-labs/mdxjs-rs-turbopack.git", branch = "turbopack" }
 # Doesn't compile on recent nightly versions because of https://github.com/Michael-F-Bryan/include_dir/pull/117
 include_dir = { git = "https://github.com/vercel-labs/include_dir", branch = "turbopack" }
+
+[patch."https://github.com/facebook/react.git"]
+react_compiler_swc = { path = "turbopack/crates/react_compiler_swc" }
